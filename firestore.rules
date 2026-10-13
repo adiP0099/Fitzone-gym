@@ -1,0 +1,321 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function validTrialRequest(data) {
+      return data.keys().hasAll([
+          'fullName', 'email', 'phone', 'preferredVisit', 'goals', 'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'fullName', 'email', 'phone', 'preferredVisit', 'goals', 'status', 'createdAt'
+        ])
+        && data.fullName is string
+        && data.fullName.size() >= 2
+        && data.fullName.size() <= 100
+        && data.fullName.matches('.*\\S.*')
+        && data.email is string
+        && data.email.size() >= 5
+        && data.email.size() <= 254
+        && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && data.phone is string
+        && data.phone.size() >= 7
+        && data.phone.size() <= 25
+        && data.phone.matches('^\\+?[0-9(). -]{7,25}$')
+        && data.preferredVisit is string
+        && data.preferredVisit in ['Weekday morning', 'Weekday evening', 'Weekend']
+        && data.goals is string
+        && data.goals.size() >= 1
+        && data.goals.size() <= 2000
+        && data.goals.matches('.*\\S.*')
+        && data.status == 'pending'
+        && data.createdAt == request.time;
+    }
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function validPlanFeature(feature) {
+      return feature is string
+        && feature.size() >= 2
+        && feature.size() <= 140
+        && feature.matches('.*\\S.*');
+    }
+
+    function validPlanFeatures(features) {
+      return features is list
+        && features.size() >= 1
+        && features.size() <= 10
+        && (features.size() < 1 || validPlanFeature(features[0]))
+        && (features.size() < 2 || validPlanFeature(features[1]))
+        && (features.size() < 3 || validPlanFeature(features[2]))
+        && (features.size() < 4 || validPlanFeature(features[3]))
+        && (features.size() < 5 || validPlanFeature(features[4]))
+        && (features.size() < 6 || validPlanFeature(features[5]))
+        && (features.size() < 7 || validPlanFeature(features[6]))
+        && (features.size() < 8 || validPlanFeature(features[7]))
+        && (features.size() < 9 || validPlanFeature(features[8]))
+        && (features.size() < 10 || validPlanFeature(features[9]));
+    }
+
+    function validPlan(data) {
+      return data.keys().hasAll([
+          'name', 'description', 'price', 'period', 'features', 'featured', 'active', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'description', 'price', 'period', 'features', 'featured', 'active', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() >= 2
+        && data.name.size() <= 60
+        && data.name.matches('.*\\S.*')
+        && data.description is string
+        && data.description.size() >= 1
+        && data.description.size() <= 500
+        && data.description.matches('.*\\S.*')
+        && data.price is number
+        && data.price >= 0
+        && data.price <= 10000
+        && data.period is string
+        && data.period in ['week', 'month', 'year']
+        && validPlanFeatures(data.features)
+        && data.featured is bool
+        && data.active is bool
+        && data.sortOrder is int
+        && data.sortOrder >= 0
+        && data.sortOrder <= 999
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /plans/{planId} {
+      allow get, list: if isAdmin() || resource.data.active == true;
+      allow create: if isAdmin()
+        && validPlan(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && validPlan(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /trialRequests/{requestId} {
+      allow create: if validTrialRequest(request.resource.data);
+      allow get, list: if isAdmin();
+      allow update: if isAdmin()
+        && resource.data.status in ['pending', 'contacted', 'approved', 'completed']
+        && request.resource.data.status in ['pending', 'contacted', 'approved', 'completed']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    function validMembershipRequest(data) {
+      return data.keys().hasAll(['uid', 'email', 'planId', 'planName', 'price', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'planId', 'planName', 'price', 'status', 'createdAt', 'updatedAt'])
+        && data.uid == request.auth.uid
+        && data.email is string && data.email == request.auth.token.email
+        && data.planId is string && data.planId.matches('^[a-z0-9-]{1,64}$')
+        && data.planName is string && data.planName.size() >= 2 && data.planName.size() <= 60 && data.planName.matches('.*\\S.*')
+        && data.price is number && data.price >= 0 && data.price <= 10000
+        && data.status == 'pending'
+        && data.createdAt == request.time && data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/plans/$(data.planId))
+        && get(/databases/$(database)/documents/plans/$(data.planId)).data.active == true
+        && get(/databases/$(database)/documents/plans/$(data.planId)).data.name == data.planName
+        && get(/databases/$(database)/documents/plans/$(data.planId)).data.price == data.price;
+    }
+
+    match /membershipRequests/{requestId} {
+      allow create: if request.auth != null && validMembershipRequest(request.resource.data);
+      allow get, list: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin()
+        && resource.data.status == 'pending'
+        // Approval must go through the trusted callable so it is atomic with subscription assignment.
+        && request.resource.data.status == 'rejected'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    function validTrainerSpecialty(value) {
+      return value is string
+        && value.size() >= 2
+        && value.size() <= 80
+        && value.matches('.*\\S.*');
+    }
+
+    function validTrainerSpecialties(specialties) {
+      return specialties is list
+        && specialties.size() >= 1
+        && specialties.size() <= 10
+        && (specialties.size() < 1 || validTrainerSpecialty(specialties[0]))
+        && (specialties.size() < 2 || validTrainerSpecialty(specialties[1]))
+        && (specialties.size() < 3 || validTrainerSpecialty(specialties[2]))
+        && (specialties.size() < 4 || validTrainerSpecialty(specialties[3]))
+        && (specialties.size() < 5 || validTrainerSpecialty(specialties[4]))
+        && (specialties.size() < 6 || validTrainerSpecialty(specialties[5]))
+        && (specialties.size() < 7 || validTrainerSpecialty(specialties[6]))
+        && (specialties.size() < 8 || validTrainerSpecialty(specialties[7]))
+        && (specialties.size() < 9 || validTrainerSpecialty(specialties[8]))
+        && (specialties.size() < 10 || validTrainerSpecialty(specialties[9]));
+    }
+
+    function validTrainer(data) {
+      return data.keys().hasAll(['displayName', 'specialties', 'bio', 'isPublished', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['displayName', 'specialties', 'bio', 'photoPath', 'isPublished', 'createdAt', 'updatedAt'])
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 100
+        && data.displayName.matches('.*\\S.*')
+        && validTrainerSpecialties(data.specialties)
+        && data.bio is string
+        && data.bio.size() <= 1000
+        && (!data.keys().hasAny(['photoPath']) || (data.photoPath is string && data.photoPath.size() <= 500))
+        && data.isPublished is bool
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    match /trainers/{trainerId} {
+      allow get, list: if isAdmin() || resource.data.isPublished == true;
+      allow create: if isAdmin()
+        && validTrainer(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && validTrainer(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
+    function validSession(data) {
+      return data.keys().hasAll(['name', 'trainerName', 'startsAt', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'trainerName', 'startsAt', 'active', 'createdAt', 'updatedAt'])
+        && data.name is string
+        && data.name.size() >= 3
+        && data.name.size() <= 100
+        && data.name.matches('.*\\S.*')
+        && data.trainerName is string
+        && data.trainerName.size() <= 100
+        && data.startsAt is timestamp
+        && data.active is bool
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    match /sessions/{sessionId} {
+      allow get, list: if request.auth != null && (isAdmin() || resource.data.active == true);
+      allow create: if isAdmin()
+        && validSession(request.resource.data)
+        && request.resource.data.startsAt > request.time
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && validSession(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
+    function validBooking(bookingId, data) {
+      return data.keys().hasAll([
+          'uid', 'sessionId', 'sessionName', 'trainerName', 'startsAt', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'sessionId', 'sessionName', 'trainerName', 'startsAt', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.uid == request.auth.uid
+        && data.sessionId is string
+        && data.sessionId.matches('^[A-Za-z0-9_-]{1,128}$')
+        && bookingId == data.uid + '_' + data.sessionId
+        && data.sessionName is string
+        && data.sessionName.size() >= 3
+        && data.sessionName.size() <= 100
+        && data.trainerName is string
+        && data.trainerName.size() <= 100
+        && data.startsAt is timestamp
+        && data.startsAt > request.time
+        && data.status == 'confirmed'
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/sessions/$(data.sessionId))
+        && get(/databases/$(database)/documents/sessions/$(data.sessionId)).data.active == true
+        && get(/databases/$(database)/documents/sessions/$(data.sessionId)).data.name == data.sessionName
+        && get(/databases/$(database)/documents/sessions/$(data.sessionId)).data.trainerName == data.trainerName
+        && get(/databases/$(database)/documents/sessions/$(data.sessionId)).data.startsAt == data.startsAt;
+    }
+
+    match /bookings/{bookingId} {
+      allow get, list: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow create: if request.auth != null && validBooking(bookingId, request.resource.data);
+      // Bookings are immutable in this phase; a trusted server can add cancellation later.
+      allow update, delete: if false;
+    }
+
+    // Trusted admins may read subscription records for member management; no client may write them.
+    match /{path=**}/subscriptions/{subscriptionId} {
+      allow read: if isAdmin();
+    }
+
+    match /users/{userId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      function validProfile(data) {
+        return data.keys().hasAll([
+            'uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt', 'firstName', 'lastName', 'phoneNumber', 'fitnessGoals'
+          ])
+          && data.uid == userId
+          && data.displayName is string
+          && data.displayName.size() <= 120
+          && data.email is string
+          && data.email == request.auth.token.email
+          && (!data.keys().hasAny(['firstName']) || (data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 60 && data.firstName.matches('.*\\S.*')))
+          && (!data.keys().hasAny(['lastName']) || (data.lastName is string && data.lastName.size() <= 60))
+          && (!data.keys().hasAny(['phoneNumber']) || (data.phoneNumber is string && data.phoneNumber.size() <= 40 && data.phoneNumber.matches('^\\+?[0-9(). -]{0,40}$')))
+          && (!data.keys().hasAny(['fitnessGoals']) || (data.fitnessGoals is string && data.fitnessGoals.size() <= 1000))
+          && data.role == 'member';
+      }
+
+      allow get: if isOwner() || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner()
+        && validProfile(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isOwner()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 120
+        && request.resource.data.firstName is string
+        && request.resource.data.firstName.size() >= 1
+        && request.resource.data.firstName.size() <= 60
+        && request.resource.data.firstName.matches('.*\\S.*')
+        && request.resource.data.lastName is string
+        && request.resource.data.lastName.size() <= 60
+        && request.resource.data.phoneNumber is string
+        && request.resource.data.phoneNumber.size() <= 40
+        && request.resource.data.phoneNumber.matches('^\\+?[0-9(). -]{0,40}$')
+        && request.resource.data.fitnessGoals is string
+        && request.resource.data.fitnessGoals.size() <= 1000
+        && request.resource.data.displayName == request.resource.data.firstName
+          + (request.resource.data.lastName == '' ? '' : ' ' + request.resource.data.lastName)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['displayName', 'firstName', 'lastName', 'phoneNumber', 'fitnessGoals', 'updatedAt']);
+      allow delete: if false;
+
+      match /subscriptions/{subscriptionId} {
+        allow read: if isOwner();
+        // Subscription assignment and payment state must be written by a trusted server.
+        allow write: if false;
+      }
+    }
+  }
+}

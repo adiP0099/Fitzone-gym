@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isTrustedAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function isAllowedImage(maxBytes) {
+      return request.resource != null
+        && request.resource.size < maxBytes
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    match /users/{uid}/profile/{fileName} {
+      allow read: if signedIn() && (request.auth.uid == uid || isTrustedAdmin());
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && isAllowedImage(5 * 1024 * 1024);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /trainers/{trainerId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isTrustedAdmin() && isAllowedImage(10 * 1024 * 1024);
+      allow delete: if isTrustedAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

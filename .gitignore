@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+
+# Keep Firebase Admin credentials and other local secret material outside Git.
+.secrets/
+service-account*.json
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+firebase-admin-credentials*.json
+*credentials*.json
+*.pem
+*.p12
+
+# Firebase CLI logs and local emulator data.
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+.firebase/
+emulator-data/
